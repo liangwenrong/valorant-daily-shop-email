@@ -1,0 +1,23 @@
+# Secrets and local configuration
+.env
+config.json
+
+# Generated images and login QR codes
+temp_val_shop/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
