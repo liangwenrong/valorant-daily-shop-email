@@ -4,8 +4,10 @@ set -e
 . /lib/functions.sh
 
 append_recipient() {
-	[ -n "$1" ] || return
-	mail_to="${mail_to}${mail_to:+,}$1"
+	if [ -n "$1" ]; then
+		mail_to="${mail_to}${mail_to:+,}$1"
+	fi
+	return 0
 }
 
 config_load valorant-daily-shop-email
@@ -40,14 +42,14 @@ mkdir -p /etc/valorant-daily-shop-email /tmp/valorant-daily-shop-email
 
 case "${1:-run}" in
 	run)
-		exec /usr/bin/python3 /usr/libexec/valorant-daily-shop-email/main.py
+		exec /usr/bin/python3 -u /usr/libexec/valorant-daily-shop-email/main.py
 		;;
 	bind)
 		rm -f /etc/valorant-daily-shop-email/config.json
-		exec /usr/bin/python3 /usr/libexec/valorant-daily-shop-email/main.py --login-only
+		exec /usr/bin/python3 -u /usr/libexec/valorant-daily-shop-email/main.py --login-only
 		;;
 	test)
-		exec /usr/bin/python3 /usr/libexec/valorant-daily-shop-email/main.py --send-test
+		exec /usr/bin/python3 -u /usr/libexec/valorant-daily-shop-email/main.py --send-test
 		;;
 	*)
 		echo "Usage: $0 {run|bind|test}" >&2

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-valorant-daily-shop-email
-PKG_VERSION:=1.0.0
+PKG_VERSION:=1.0.1
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 
@@ -36,12 +36,14 @@ define Package/luci-app-valorant-daily-shop-email/postinst
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 chmod 600 /etc/config/valorant-daily-shop-email 2>/dev/null || true
 mkdir -p /etc/valorant-daily-shop-email /tmp/valorant-daily-shop-email
-if ! /usr/bin/python3 -c 'import aiohttp, PIL' >/dev/null 2>&1; then
-	/usr/bin/pip3 install --no-cache-dir 'aiohttp>=3.9,<4' 'Pillow>=10,<13' || \
-		/usr/bin/pip3 install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple 'aiohttp>=3.9,<4' 'Pillow>=10,<13' || exit 1
+if ! /usr/bin/python3 -c 'import aiohttp' >/dev/null 2>&1; then
+	/usr/bin/pip3 install --no-cache-dir 'aiohttp>=3.9,<4' || \
+		/usr/bin/pip3 install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple 'aiohttp>=3.9,<4' || exit 1
 fi
 rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null || true
 /etc/init.d/valorant-daily-shop-email enable 2>/dev/null || true
+[ "$$(uci -q get valorant-daily-shop-email.main.enabled)" = "1" ] && \
+	/etc/init.d/valorant-daily-shop-email restart 2>/dev/null || true
 exit 0
 endef
 

@@ -20,6 +20,7 @@ import asyncio
 import argparse
 import base64
 import hashlib
+import html
 import json
 import logging
 import os
@@ -38,7 +39,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List
 
 import aiohttp
-from PIL import Image as PILImage, ImageDraw, ImageFont
 
 
 # =========================
@@ -64,6 +64,7 @@ MAIL_SUBJECT_PREFIX = os.getenv("VAL_SHOP_SUBJECT_PREFIX", "无畏契约每日�
 
 # 是否在配置缺失时也允许先登录账号
 ALLOW_LOGIN_WITHOUT_MAIL_CONFIG = True
+LOGIN_TIMEOUT_SECONDS = max(60, int(os.getenv("VAL_SHOP_LOGIN_TIMEOUT", "300")))
 
 
 # =========================
@@ -72,6 +73,7 @@ ALLOW_LOGIN_WITHOUT_MAIL_CONFIG = True
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("VAL_SHOP_DATA_DIR", str(BASE_DIR))).expanduser()
 CONFIG_FILE = DATA_DIR / "config.json"
+AUTH_EXPIRED_STATE_FILE = DATA_DIR / "auth-expired-notified"
 TEMP_DIR = Path(os.getenv("VAL_SHOP_TEMP_DIR", str(BASE_DIR / "temp_val_shop"))).expanduser()
 FONT_FILE = BASE_DIR / "fontFamily.ttf"
 
@@ -154,6 +156,25 @@ class ValorantShopEmail:
     def __init__(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        self.cleanup_temp_files(stale_only=True)
+
+    def cleanup_temp_files(self, stale_only: bool = False) -> None:
+        now = time.time()
+        for path in TEMP_DIR.iterdir():
+            if not path.is_file() or path.name == "merged.jpg":
+                continue
+            is_generated = (
+                path.name.startswith(("bg_", "goods_", "qq_login_", "wechat_login_"))
+                or path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+            )
+            if not is_generated:
+                continue
+            if stale_only and now - path.stat().st_mtime < 86400:
+                continue
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     # ---------- 基础工具 ----------
 
@@ -753,7 +774,7 @@ class ValorantShopEmail:
                 jsver=ctx.get("jsver", "28d22679"),
                 pt_uistyle=ctx.get("pt_uistyle", "35"),
                 ptlang=ctx.get("ptlang", "2052"),
-                timeout=90,
+                timeout=LOGIN_TIMEOUT_SECONDS,
             )
             if not login_data:
                 return None
@@ -934,7 +955,7 @@ class ValorantShopEmail:
 
             print("\n微信登录二维码已生成：")
             print(qr_path)
-            print("请打开这张图片，用微信扫码确认。最长等待 90 秒。\n")
+            print(f"请打开这张图片，用微信扫码确认。最长等待 {LOGIN_TIMEOUT_SECONDS} 秒。\n")
 
             return await self._val_wechat_login_task(uuid)
 
@@ -959,7 +980,7 @@ class ValorantShopEmail:
 
                 wx_code = None
                 last_code = None
-                for _ in range(45):
+                for _ in range(max(1, LOGIN_TIMEOUT_SECONDS // 2)):
                     await asyncio.sleep(2)
 
                     poll_url = f"https://long.open.weixin.qq.com/connect/l/qrconnect?f=json&uuid={uuid}"
@@ -1072,6 +1093,9 @@ class ValorantShopEmail:
 
     def save_config(self, data: Dict[str, Any]) -> None:
         CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        AUTH_EXPIRED_STATE_FILE.unlink(missing_ok=True)
+        for qr_path in TEMP_DIR.glob("*_login_*.png"):
+            qr_path.unlink(missing_ok=True)
         logger.info("登录配置已保存：%s", CONFIG_FILE)
 
     def check_mail_config(self, strict: bool = True) -> bool:
@@ -1239,10 +1263,17 @@ class ValorantShopEmail:
             logger.error("下载图片失败 %s：%s", url, e)
             return None
 
-    def _load_font(self, size: int = DEFAULT_FONT_SIZE):
+    def _load_pillow(self):
+        try:
+            from PIL import Image as pil_image, ImageDraw as image_draw, ImageFont as image_font
+        except (ImportError, OSError) as exc:
+            raise RuntimeError(f"Pillow 不可用：{exc}") from exc
+        return pil_image, image_draw, image_font
+
+    def _load_font(self, image_font, size: int = DEFAULT_FONT_SIZE):
         if FONT_FILE.exists():
             try:
-                return ImageFont.truetype(str(FONT_FILE), size)
+                return image_font.truetype(str(FONT_FILE), size)
             except Exception:
                 pass
 
@@ -1255,16 +1286,17 @@ class ValorantShopEmail:
         ]:
             try:
                 if Path(p).exists():
-                    return ImageFont.truetype(p, size)
+                    return image_font.truetype(p, size)
             except Exception:
                 pass
 
         logger.warning("未找到中文字体，图片上的中文可能显示异常")
-        return ImageFont.load_default()
+        return image_font.load_default()
 
     async def generate_shop_image(self, goods_list: List[Dict[str, Any]]) -> Path:
+        PILImage, ImageDraw, ImageFont = self._load_pillow()
         processed_images = []
-        font = self._load_font(DEFAULT_FONT_SIZE)
+        font = self._load_font(ImageFont, DEFAULT_FONT_SIZE)
 
         for i, goods in enumerate(goods_list):
             name = str(goods.get("goods_name", f"商品{i+1}"))
@@ -1349,8 +1381,31 @@ class ValorantShopEmail:
             price = str(goods.get("rmb_price") or goods.get("price") or "0")
             lines.append(f"- {name}：{price}")
         lines.append("")
-        lines.append("图片见附件 merged.jpg。")
+        lines.append("商品图片见 HTML 邮件正文；支持时也会附带 merged.jpg。")
         return "\n".join(lines)
+
+    def build_mail_html(self, goods_list: List[Dict[str, Any]]) -> str:
+        cards = []
+        for goods in goods_list:
+            name = html.escape(str(goods.get("goods_name", "未知商品")))
+            price = html.escape(str(goods.get("rmb_price") or goods.get("price") or "0"))
+            image_url = html.escape(str(goods.get("goods_pic") or goods.get("bg_image") or ""), quote=True)
+            image_markup = (
+                f'<img src="{image_url}" alt="{name}" style="max-width:420px;width:100%;height:auto;display:block">'
+                if image_url
+                else ""
+            )
+            cards.append(
+                '<div style="margin:0 0 20px;padding:16px;border:1px solid #d9dde5">'
+                + image_markup
+                + f'<div style="margin-top:12px;font-size:16px"><strong>{name}</strong></div>'
+                + f'<div style="margin-top:6px;color:#555">价格：{price}</div></div>'
+            )
+        date = datetime.now().strftime("%Y-%m-%d")
+        return (
+            '<div style="font-family:Arial,\'Microsoft YaHei\',sans-serif;max-width:560px">'
+            f'<h2>今日无畏契约商店（{date}）</h2>' + "".join(cards) + "</div>"
+        )
 
     def _deliver_message(self, msg: MIMEMultipart) -> None:
         self.check_mail_config(strict=True)
@@ -1375,7 +1430,7 @@ class ValorantShopEmail:
                 smtp.login(SMTP_USERNAME, MAIL_PASS)
                 smtp.sendmail(MAIL_USER, recipients, msg.as_string())
 
-    def send_email(self, goods_list: List[Dict[str, Any]], image_path: Path) -> None:
+    def send_email(self, goods_list: List[Dict[str, Any]], image_path: Optional[Path] = None) -> None:
 
         date = datetime.now().strftime("%Y-%m-%d")
         subject = f"{MAIL_SUBJECT_PREFIX}（{date}）"
@@ -1384,11 +1439,13 @@ class ValorantShopEmail:
         msg["Subject"] = subject
 
         msg.attach(MIMEText(self.build_mail_body(goods_list), "plain", "utf-8"))
+        msg.attach(MIMEText(self.build_mail_html(goods_list), "html", "utf-8"))
 
-        with open(image_path, "rb") as f:
-            part = MIMEApplication(f.read(), _subtype="jpg")
-            part.add_header("Content-Disposition", "attachment", filename="merged.jpg")
-            msg.attach(part)
+        if image_path and image_path.exists():
+            with open(image_path, "rb") as f:
+                part = MIMEApplication(f.read(), _subtype="jpg")
+                part.add_header("Content-Disposition", "attachment", filename="merged.jpg")
+                msg.attach(part)
 
         self._deliver_message(msg)
         logger.info("邮件发送成功")
@@ -1399,6 +1456,18 @@ class ValorantShopEmail:
         msg.attach(MIMEText("SMTP 配置测试成功。", "plain", "utf-8"))
         self._deliver_message(msg)
         logger.info("测试邮件发送成功")
+
+    def send_auth_expired_notice_once(self) -> None:
+        state = AUTH_EXPIRED_STATE_FILE.read_text(encoding="utf-8").strip() if AUTH_EXPIRED_STATE_FILE.exists() else ""
+        if state == "sent":
+            return
+        AUTH_EXPIRED_STATE_FILE.write_text("pending", encoding="utf-8")
+        msg = MIMEMultipart()
+        msg["Subject"] = f"{MAIL_SUBJECT_PREFIX}（登录凭证已过期）"
+        msg.attach(MIMEText("无畏契约登录凭证已过期，请进入路由器管理页面重新扫码绑定账号。", "plain", "utf-8"))
+        self._deliver_message(msg)
+        AUTH_EXPIRED_STATE_FILE.write_text("sent", encoding="utf-8")
+        logger.info("登录凭证过期提醒已发送")
 
     # ---------- 主流程 ----------
 
@@ -1436,6 +1505,9 @@ class ValorantShopEmail:
 
         user_config = self.load_config()
         if not user_config:
+            if AUTH_EXPIRED_STATE_FILE.exists():
+                self.send_auth_expired_notice_once()
+                raise RuntimeError("登录凭证已失效，等待重新扫码绑定")
             user_config = await self.login_flow()
             if not user_config:
                 raise RuntimeError("账号绑定失败")
@@ -1443,11 +1515,14 @@ class ValorantShopEmail:
         response_data, err_msg, auth_invalid = await self.request_store_api(user_config)
         if not response_data:
             if auth_invalid:
+                if not AUTH_EXPIRED_STATE_FILE.exists():
+                    AUTH_EXPIRED_STATE_FILE.write_text("pending", encoding="utf-8")
                 try:
                     CONFIG_FILE.unlink(missing_ok=True)
                 except TypeError:
                     if CONFIG_FILE.exists():
                         CONFIG_FILE.unlink()
+                self.send_auth_expired_notice_once()
                 raise RuntimeError(f"登录凭证已失效：{err_msg}。已删除 config.json，请重新运行扫码绑定。")
             raise RuntimeError(f"获取商店失败：{err_msg}")
 
@@ -1457,7 +1532,11 @@ class ValorantShopEmail:
         if not goods_list:
             raise RuntimeError("今日商店暂无可用数据")
 
-        image_path = await self.generate_shop_image(goods_list)
+        image_path = None
+        try:
+            image_path = await self.generate_shop_image(goods_list)
+        except RuntimeError as exc:
+            logger.warning("无法生成汇总附件，将发送 HTML 商品图片：%s", exc)
         self.send_email(goods_list, image_path)
 
         names = [str(g.get("goods_name", "未知商品")) for g in goods_list]
@@ -1474,16 +1553,16 @@ async def main():
         app.send_test_email()
         return
     if args.login_only:
-        if not await app.login_flow():
-            raise RuntimeError("账号绑定失败")
-        return
+        try:
+            if not await app.login_flow():
+                raise RuntimeError("账号绑定失败")
+            return
+        finally:
+            app.cleanup_temp_files()
     try:
         await app.run_once()
     finally:
-        # 保留 merged.jpg，清理临时下载图
-        # 如果你想完全清理，把下面注释取消。
-        # shutil.rmtree(TEMP_DIR, ignore_errors=True)
-        pass
+        app.cleanup_temp_files()
 
 
 if __name__ == "__main__":

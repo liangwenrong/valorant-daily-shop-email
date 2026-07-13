@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -58,6 +59,33 @@ class MailTests(unittest.TestCase):
                 client.sendmail.call_args.args[1],
                 ["one@example.com", "two@example.com"],
             )
+
+    def test_html_fallback_contains_product(self):
+        monitor = load_monitor()
+        app = monitor.ValorantShopEmail()
+        content = app.build_mail_html(
+            [{"goods_name": "测试商品", "rmb_price": "88", "goods_pic": "https://example.com/item.png"}]
+        )
+        self.assertIn("测试商品", content)
+        self.assertIn("https://example.com/item.png", content)
+
+    def test_expired_notice_is_sent_once(self):
+        environment = {
+            "MAIL_USER": "sender@163.com",
+            "MAIL_PASS": "authorization-code",
+            "MAIL_TO": "one@example.com",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.dict(os.environ, environment, clear=True):
+            monitor = load_monitor()
+            marker = Path(temp_dir) / "expired"
+            app = monitor.ValorantShopEmail()
+            with mock.patch.object(monitor, "AUTH_EXPIRED_STATE_FILE", marker), mock.patch.object(
+                app, "_deliver_message"
+            ) as deliver:
+                app.send_auth_expired_notice_once()
+                app.send_auth_expired_notice_once()
+            deliver.assert_called_once()
+            self.assertEqual(marker.read_text(encoding="utf-8"), "sent")
 
 
 if __name__ == "__main__":

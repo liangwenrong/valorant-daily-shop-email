@@ -1,0 +1,144 @@
+<style>
+#cbi-valorant-daily-shop-email .cbi-value-field > div:not(.cbi-dynlist) > input[type="text"],
+#cbi-valorant-daily-shop-email .cbi-value-field > div:not(.cbi-dynlist) > select,
+#cbi-valorant-daily-shop-email .cbi-value-field > div:not(.cbi-dynlist) > textarea {
+	box-sizing: border-box;
+	width: 314px !important;
+	max-width: 314px !important;
+}
+#cbi-valorant-daily-shop-email .cbi-value-field {
+	box-sizing: border-box;
+	width: 320px !important;
+	max-width: 320px !important;
+}
+#cbi-valorant-daily-shop-email .cbi-input-password {
+	box-sizing: border-box;
+	width: 280px !important;
+}
+#cbi-valorant-daily-shop-email .cbi-dynlist {
+	width: 314px !important;
+	max-width: 314px;
+}
+#cbi-valorant-daily-shop-email .cbi-dynlist > .item {
+	display: flex !important;
+	width: 100%;
+}
+#cbi-valorant-daily-shop-email .cbi-dynlist input {
+	box-sizing: border-box;
+	flex: 1 1 auto;
+	min-width: 0;
+	width: auto !important;
+}
+#cbi-valorant-daily-shop-email .cbi-dynlist .btn,
+#cbi-valorant-daily-shop-email .cbi-input-password + .btn {
+	flex: 0 0 2.5rem;
+	width: 2.5rem;
+}
+#valorant-bind-status {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 12px;
+	min-height: 24px;
+}
+#valorant-bind-qr {
+	box-sizing: border-box;
+	width: 240px;
+	height: 240px;
+	max-width: 100%;
+	object-fit: contain;
+	background: #fff;
+	border: 1px solid #d9dde5;
+	padding: 8px;
+}
+@media (max-width: 720px) {
+	#cbi-valorant-daily-shop-email .cbi-value-field {
+		width: 100%;
+		max-width: none;
+	}
+	#cbi-valorant-daily-shop-email .cbi-value-field > div:not(.cbi-dynlist) > input[type="text"],
+	#cbi-valorant-daily-shop-email .cbi-value-field > div:not(.cbi-dynlist) > select,
+	#cbi-valorant-daily-shop-email .cbi-value-field > div:not(.cbi-dynlist) > textarea {
+		width: 100% !important;
+		max-width: none !important;
+	}
+	#cbi-valorant-daily-shop-email .cbi-input-password {
+		width: calc(100% - 2.5rem) !important;
+	}
+	#cbi-valorant-daily-shop-email .cbi-dynlist {
+		width: 100% !important;
+		max-width: none;
+	}
+}
+</style>
+<script type="text/javascript">
+(function() {
+	var statusUrl = '<%=luci.dispatcher.build_url("admin", "services", "valorant-daily-shop-email", "status")%>';
+	var qrUrl = '<%=luci.dispatcher.build_url("admin", "services", "valorant-daily-shop-email", "qr")%>';
+	var bindUrl = '<%=luci.dispatcher.build_url("admin", "services", "valorant-daily-shop-email", "bind")%>';
+	var attempts = 0;
+
+	function updateBindingStatus() {
+		var message = document.getElementById('valorant-bind-message');
+		var image = document.getElementById('valorant-bind-qr');
+		if (!message || !image || attempts++ > 180) return;
+
+		var request = new XMLHttpRequest();
+		request.open('GET', statusUrl + '?t=' + Date.now(), true);
+		request.onreadystatechange = function() {
+			if (request.readyState !== 4) return;
+			if (request.status === 200) {
+				try {
+					var data = JSON.parse(request.responseText);
+					if (data.state === 'bound') {
+						message.textContent = '账号已绑定';
+						image.style.display = 'none';
+						return;
+					}
+					if (data.state === 'qr') {
+						message.textContent = '请扫码完成绑定';
+						image.src = qrUrl + '?t=' + Date.now();
+						image.style.display = 'block';
+					} else if (data.state === 'waiting') {
+						message.textContent = '正在生成二维码...';
+						image.style.display = 'none';
+					} else if (data.state === 'error') {
+						message.textContent = '绑定失败，请查看运行日志';
+						image.style.display = 'none';
+					}
+				} catch (error) {}
+			}
+			window.setTimeout(updateBindingStatus, 1000);
+		};
+		request.send(null);
+	}
+
+	var bindButton = document.getElementById('valorant-start-bind');
+	if (bindButton) {
+		bindButton.addEventListener('click', function() {
+			var message = document.getElementById('valorant-bind-message');
+			var image = document.getElementById('valorant-bind-qr');
+			var method = document.querySelector('select[name="cbid.valorant-daily-shop-email.main.login_method"]');
+			bindButton.disabled = true;
+			if (message) message.textContent = '正在启动绑定任务...';
+			if (image) image.style.display = 'none';
+
+			var request = new XMLHttpRequest();
+			request.open('GET', bindUrl + '?t=' + Date.now() + '&login_method=' + encodeURIComponent(method ? method.value : 'qq'), true);
+			request.onreadystatechange = function() {
+				if (request.readyState !== 4) return;
+				bindButton.disabled = false;
+				if (request.status !== 200) {
+					if (message) message.textContent = '绑定任务启动失败';
+					return;
+				}
+				attempts = 0;
+				updateBindingStatus();
+			};
+			request.send(null);
+		});
+	}
+
+	window.setTimeout(updateBindingStatus, 300);
+})();
+</script>

@@ -12,6 +12,8 @@
 - 下载商品素材并生成汇总图片
 - 通过 SMTP 邮件推送
 - 支持 Windows、Linux 和 OpenWrt 定时运行
+- 登录凭证过期时发送一次重新绑定提醒
+- 自动清理临时素材和失效登录二维码
 
 ## 环境要求
 
@@ -81,10 +83,10 @@ python3 main.py
 从 [Releases](https://github.com/Ceylan233/valorant-daily-shop-email/releases) 下载 IPK 后安装：
 
 ```sh
-opkg install luci-app-valorant-daily-shop-email_1.0.0-1_all.ipk
+opkg install luci-app-valorant-daily-shop-email_1.0.1-1_all.ipk
 ```
 
-安装后进入 LuCI 的“服务 → 无畏契约每日商店”，填写邮箱、选择扫码方式并保存。点击“扫码绑定账号”后刷新页面可显示二维码；页面也支持立即运行、测试邮件和每日定时。
+安装后进入 LuCI 的“服务 → 无畏契约每日商店”，填写邮箱、选择扫码方式并保存。点击“扫码绑定账号”后页面会自动显示二维码；页面也支持立即运行、测试邮件和每日定时。
 
 ## 定时运行
 
