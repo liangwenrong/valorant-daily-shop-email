@@ -1,0 +1,56 @@
+#!/bin/sh
+set -e
+
+. /lib/functions.sh
+
+append_recipient() {
+	[ -n "$1" ] || return
+	mail_to="${mail_to}${mail_to:+,}$1"
+}
+
+config_load valorant-daily-shop-email
+config_get login_method main login_method qq
+config_get mail_provider main mail_provider 163
+config_get mail_user main mail_user
+config_get mail_pass main mail_pass
+config_get smtp_host main smtp_host
+config_get smtp_username main smtp_username
+config_get smtp_port main smtp_port
+config_get smtp_security main smtp_security
+config_get subject_prefix main subject_prefix 无畏契约每日商店
+config_list_foreach main mail_to append_recipient
+
+export VAL_SHOP_LOGIN_METHOD="$login_method"
+export VAL_SHOP_DATA_DIR=/etc/valorant-daily-shop-email
+export VAL_SHOP_TEMP_DIR=/tmp/valorant-daily-shop-email
+export MAIL_PROVIDER="$mail_provider"
+export MAIL_USER="$mail_user"
+export MAIL_PASS="$mail_pass"
+export MAIL_TO="$mail_to"
+export VAL_SHOP_SUBJECT_PREFIX="$subject_prefix"
+[ -n "$smtp_username" ] && export SMTP_USERNAME="$smtp_username"
+
+if [ "$mail_provider" = custom ]; then
+	[ -n "$smtp_host" ] && export SMTP_HOST="$smtp_host"
+	[ -n "$smtp_port" ] && export SMTP_PORT="$smtp_port"
+	[ -n "$smtp_security" ] && export SMTP_SECURITY="$smtp_security"
+fi
+
+mkdir -p /etc/valorant-daily-shop-email /tmp/valorant-daily-shop-email
+
+case "${1:-run}" in
+	run)
+		exec /usr/bin/python3 /usr/libexec/valorant-daily-shop-email/main.py
+		;;
+	bind)
+		rm -f /etc/valorant-daily-shop-email/config.json
+		exec /usr/bin/python3 /usr/libexec/valorant-daily-shop-email/main.py --login-only
+		;;
+	test)
+		exec /usr/bin/python3 /usr/libexec/valorant-daily-shop-email/main.py --send-test
+		;;
+	*)
+		echo "Usage: $0 {run|bind|test}" >&2
+		exit 2
+		;;
+esac

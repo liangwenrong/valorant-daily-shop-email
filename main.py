@@ -17,6 +17,7 @@ pip install aiohttp pillow
 """
 
 import asyncio
+import argparse
 import base64
 import hashlib
 import json
@@ -46,8 +47,17 @@ from PIL import Image as PILImage, ImageDraw, ImageFont
 MAIL_USER = os.getenv("MAIL_USER")
 MAIL_PASS = os.getenv("MAIL_PASS")
 MAIL_TO = os.getenv("MAIL_TO") or MAIL_USER
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.163.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+MAIL_PROVIDER = os.getenv("MAIL_PROVIDER", "auto").strip().lower()
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip() or MAIL_USER
+
+SMTP_PROVIDERS = {
+    "163": ("smtp.163.com", 465, "ssl"),
+    "126": ("smtp.126.com", 465, "ssl"),
+    "qq": ("smtp.qq.com", 465, "ssl"),
+    "gmail": ("smtp.gmail.com", 465, "ssl"),
+    "yahoo": ("smtp.mail.yahoo.com", 465, "ssl"),
+    "outlook": ("smtp-mail.outlook.com", 587, "starttls"),
+}
 
 # 邮件标题前缀
 MAIL_SUBJECT_PREFIX = os.getenv("VAL_SHOP_SUBJECT_PREFIX", "无畏契约每日商店")
@@ -60,8 +70,9 @@ ALLOW_LOGIN_WITHOUT_MAIL_CONFIG = True
 # 文件配置
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
-CONFIG_FILE = BASE_DIR / "config.json"
-TEMP_DIR = BASE_DIR / "temp_val_shop"
+DATA_DIR = Path(os.getenv("VAL_SHOP_DATA_DIR", str(BASE_DIR))).expanduser()
+CONFIG_FILE = DATA_DIR / "config.json"
+TEMP_DIR = Path(os.getenv("VAL_SHOP_TEMP_DIR", str(BASE_DIR / "temp_val_shop"))).expanduser()
 FONT_FILE = BASE_DIR / "fontFamily.ttf"
 
 # 如果没有字体文件，就用系统默认字体
@@ -74,6 +85,43 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("valorant_shop_email")
+
+
+def infer_mail_provider(address: str) -> str:
+    domain = (address.rsplit("@", 1)[-1] if "@" in address else "").lower()
+    if domain == "163.com":
+        return "163"
+    if domain == "126.com":
+        return "126"
+    if domain in {"qq.com", "foxmail.com"}:
+        return "qq"
+    if domain in {"gmail.com", "googlemail.com"}:
+        return "gmail"
+    if domain in {"yahoo.com", "yahoo.com.cn"}:
+        return "yahoo"
+    if domain in {"outlook.com", "hotmail.com", "live.com", "msn.com"}:
+        return "outlook"
+    return "custom"
+
+
+def parse_recipients(value: str) -> List[str]:
+    return [item for item in re.split(r"[,;\s]+", value or "") if item]
+
+
+def smtp_settings(address: str) -> Tuple[str, int, str]:
+    provider = MAIL_PROVIDER
+    if provider == "auto":
+        provider = infer_mail_provider(address)
+
+    defaults = SMTP_PROVIDERS.get(provider, ("", 465, "ssl"))
+    host = os.getenv("SMTP_HOST", "").strip() or defaults[0]
+    port = int(os.getenv("SMTP_PORT", "").strip() or defaults[1])
+    security = os.getenv("SMTP_SECURITY", "").strip().lower() or defaults[2]
+    if not host:
+        raise RuntimeError("自定义 SMTP 必须填写 SMTP_HOST")
+    if security not in {"ssl", "starttls", "plain"}:
+        raise RuntimeError("SMTP_SECURITY 必须是 ssl、starttls 或 plain")
+    return host, port, security
 
 
 class ValorantShopEmail:
@@ -104,6 +152,7 @@ class ValorantShopEmail:
     STORE_URL = "https://app.mval.qq.com/go/mlol_store/agame/user_store"
 
     def __init__(self):
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
     # ---------- 基础工具 ----------
@@ -1303,15 +1352,35 @@ class ValorantShopEmail:
         lines.append("图片见附件 merged.jpg。")
         return "\n".join(lines)
 
-    def send_email(self, goods_list: List[Dict[str, Any]], image_path: Path) -> None:
+    def _deliver_message(self, msg: MIMEMultipart) -> None:
         self.check_mail_config(strict=True)
+        recipients = parse_recipients(MAIL_TO or "")
+        if not recipients:
+            raise RuntimeError("MAIL_TO 未配置有效的收件邮箱")
+        smtp_host, smtp_port, smtp_security = smtp_settings(MAIL_USER or "")
+
+        msg["From"] = MAIL_USER
+        msg["To"] = ", ".join(recipients)
+        logger.info("正在发送邮件到：%s", ", ".join(recipients))
+        if smtp_security == "ssl":
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as smtp:
+                smtp.login(SMTP_USERNAME, MAIL_PASS)
+                smtp.sendmail(MAIL_USER, recipients, msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
+                if smtp_security == "starttls":
+                    smtp.ehlo()
+                    smtp.starttls()
+                    smtp.ehlo()
+                smtp.login(SMTP_USERNAME, MAIL_PASS)
+                smtp.sendmail(MAIL_USER, recipients, msg.as_string())
+
+    def send_email(self, goods_list: List[Dict[str, Any]], image_path: Path) -> None:
 
         date = datetime.now().strftime("%Y-%m-%d")
         subject = f"{MAIL_SUBJECT_PREFIX}（{date}）"
 
         msg = MIMEMultipart()
-        msg["From"] = MAIL_USER
-        msg["To"] = MAIL_TO
         msg["Subject"] = subject
 
         msg.attach(MIMEText(self.build_mail_body(goods_list), "plain", "utf-8"))
@@ -1321,21 +1390,30 @@ class ValorantShopEmail:
             part.add_header("Content-Disposition", "attachment", filename="merged.jpg")
             msg.attach(part)
 
-        logger.info("正在发送邮件到：%s", MAIL_TO)
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
-            smtp.login(MAIL_USER, MAIL_PASS)
-            smtp.sendmail(MAIL_USER, [MAIL_TO], msg.as_string())
-
+        self._deliver_message(msg)
         logger.info("邮件发送成功")
+
+    def send_test_email(self) -> None:
+        msg = MIMEMultipart()
+        msg["Subject"] = f"{MAIL_SUBJECT_PREFIX}（测试）"
+        msg.attach(MIMEText("SMTP 配置测试成功。", "plain", "utf-8"))
+        self._deliver_message(msg)
+        logger.info("测试邮件发送成功")
 
     # ---------- 主流程 ----------
 
     async def login_flow(self) -> Optional[Dict[str, Any]]:
         print("\n没有检测到 config.json，需要先扫码绑定账号。")
-        print("请选择登录方式：")
-        print("1. QQ 二维码登录")
-        print("2. 微信二维码登录")
-        choice = input("输入 1 或 2 后回车：").strip()
+        login_method = os.getenv("VAL_SHOP_LOGIN_METHOD", "").strip().lower()
+        if login_method in {"wechat", "2"}:
+            choice = "2"
+        elif login_method in {"qq", "1"}:
+            choice = "1"
+        else:
+            print("请选择登录方式：")
+            print("1. QQ 二维码登录")
+            print("2. 微信二维码登录")
+            choice = input("输入 1 或 2 后回车：").strip()
 
         if choice == "2":
             data = await self.wechat_login()
@@ -1387,7 +1465,18 @@ class ValorantShopEmail:
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="无畏契约每日商店邮件推送")
+    parser.add_argument("--send-test", action="store_true", help="发送 SMTP 测试邮件")
+    parser.add_argument("--login-only", action="store_true", help="仅扫码绑定账号")
+    args = parser.parse_args()
     app = ValorantShopEmail()
+    if args.send_test:
+        app.send_test_email()
+        return
+    if args.login_only:
+        if not await app.login_flow():
+            raise RuntimeError("账号绑定失败")
+        return
     try:
         await app.run_once()
     finally:

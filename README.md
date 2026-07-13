@@ -42,15 +42,18 @@ pip install -r requirements.txt
 
 ## 配置
 
-程序通过环境变量读取邮箱信息。163 邮箱需要使用 SMTP 授权码，不要填写邮箱登录密码。
+程序通过环境变量读取邮箱信息。支持 163、126、QQ/Foxmail、Gmail、Yahoo、Outlook 和自定义 SMTP；邮箱通常需要使用 SMTP 授权码或应用密码。
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `MAIL_USER` | 是 | - | 发件邮箱 |
 | `MAIL_PASS` | 是 | - | SMTP 授权码 |
-| `MAIL_TO` | 否 | 与发件邮箱相同 | 收件邮箱 |
-| `SMTP_HOST` | 否 | `smtp.163.com` | SMTP 服务器 |
-| `SMTP_PORT` | 否 | `465` | SMTP SSL 端口 |
+| `MAIL_TO` | 否 | 与发件邮箱相同 | 收件邮箱，多个地址用逗号分隔 |
+| `MAIL_PROVIDER` | 否 | `auto` | 邮箱类型或 `custom` |
+| `SMTP_HOST` | 自定义时 | - | SMTP 服务器 |
+| `SMTP_USERNAME` | 否 | 发件邮箱 | SMTP 登录用户名 |
+| `SMTP_PORT` | 否 | 随服务商 | SMTP 端口 |
+| `SMTP_SECURITY` | 否 | 随服务商 | `ssl`、`starttls` 或 `plain` |
 | `VAL_SHOP_SUBJECT_PREFIX` | 否 | `无畏契约每日商店` | 邮件标题前缀 |
 
 PowerShell 示例：
@@ -72,6 +75,16 @@ python3 main.py
 ```
 
 首次运行时按提示选择 QQ 或微信扫码登录。成功后会生成 `config.json`，其中包含账号登录凭证，已被 `.gitignore` 排除，请勿公开或分享。
+
+## OpenWrt / iStoreOS 软件包
+
+从 [Releases](https://github.com/Ceylan233/valorant-daily-shop-email/releases) 下载 IPK 后安装：
+
+```sh
+opkg install luci-app-valorant-daily-shop-email_1.0.0-1_all.ipk
+```
+
+安装后进入 LuCI 的“服务 → 无畏契约每日商店”，填写邮箱、选择扫码方式并保存。点击“扫码绑定账号”后刷新页面可显示二维码；页面也支持立即运行、测试邮件和每日定时。
 
 ## 定时运行
 
