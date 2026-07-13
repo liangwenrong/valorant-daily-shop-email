@@ -1,14 +1,9 @@
 #!/bin/sh
 
-PID=/tmp/valorant-daily-shop-email.bind.pid
 LOG=/tmp/valorant-daily-shop-email.log
 
-if [ -s "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
-	exit 0
-fi
-
-rm -f "$PID" "$LOG" /tmp/valorant-daily-shop-email/*_login_*.png
+/usr/libexec/valorant-daily-shop-email/stop-bind
 mkdir -p /tmp/valorant-daily-shop-email
 
-start-stop-daemon -S -b -m -p "$PID" -x /bin/sh -- \
+start-stop-daemon -S -b -m -p /tmp/valorant-daily-shop-email.bind.pid -x /bin/sh -- \
 	-c "exec /usr/libexec/valorant-daily-shop-email/run bind >$LOG 2>&1"

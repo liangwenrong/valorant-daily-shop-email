@@ -76,9 +76,15 @@
 	var statusUrl = '<%=luci.dispatcher.build_url("admin", "services", "valorant-daily-shop-email", "status")%>';
 	var qrUrl = '<%=luci.dispatcher.build_url("admin", "services", "valorant-daily-shop-email", "qr")%>';
 	var bindUrl = '<%=luci.dispatcher.build_url("admin", "services", "valorant-daily-shop-email", "bind")%>';
+	var cancelUrl = '<%=luci.dispatcher.build_url("admin", "services", "valorant-daily-shop-email", "cancel-bind")%>';
 	var attempts = 0;
+	var pollingPaused = false;
 
 	function updateBindingStatus() {
+		if (pollingPaused) {
+			window.setTimeout(updateBindingStatus, 1000);
+			return;
+		}
 		var message = document.getElementById('valorant-bind-message');
 		var image = document.getElementById('valorant-bind-qr');
 		if (!message || !image || attempts++ > 180) return;
@@ -87,6 +93,7 @@
 		request.open('GET', statusUrl + '?t=' + Date.now(), true);
 		request.onreadystatechange = function() {
 			if (request.readyState !== 4) return;
+			if (pollingPaused) return;
 			if (request.status === 200) {
 				try {
 					var data = JSON.parse(request.responseText);
@@ -114,17 +121,34 @@
 	}
 
 	var bindButton = document.getElementById('valorant-start-bind');
+	document.addEventListener('change', function(event) {
+		var target = event.target;
+		if (!target || target.name !== 'cbid.valorant-daily-shop-email.main.login_method') return;
+
+		pollingPaused = true;
+		var message = document.getElementById('valorant-bind-message');
+		var image = document.getElementById('valorant-bind-qr');
+		if (message) message.textContent = '扫码方式已切换，请重新点击绑定';
+		if (image) {
+			image.removeAttribute('src');
+			image.style.display = 'none';
+		}
+		var request = new XMLHttpRequest();
+		request.open('GET', cancelUrl + '?t=' + Date.now(), true);
+		request.send(null);
+	});
 	if (bindButton) {
 		bindButton.addEventListener('click', function() {
+			pollingPaused = false;
 			var message = document.getElementById('valorant-bind-message');
 			var image = document.getElementById('valorant-bind-qr');
-			var method = document.querySelector('select[name="cbid.valorant-daily-shop-email.main.login_method"]');
+			var methodSelect = document.querySelector('select[name="cbid.valorant-daily-shop-email.main.login_method"]');
 			bindButton.disabled = true;
 			if (message) message.textContent = '正在启动绑定任务...';
 			if (image) image.style.display = 'none';
 
 			var request = new XMLHttpRequest();
-			request.open('GET', bindUrl + '?t=' + Date.now() + '&login_method=' + encodeURIComponent(method ? method.value : 'qq'), true);
+			request.open('GET', bindUrl + '?t=' + Date.now() + '&login_method=' + encodeURIComponent(methodSelect ? methodSelect.value : 'qq'), true);
 			request.onreadystatechange = function() {
 				if (request.readyState !== 4) return;
 				bindButton.disabled = false;

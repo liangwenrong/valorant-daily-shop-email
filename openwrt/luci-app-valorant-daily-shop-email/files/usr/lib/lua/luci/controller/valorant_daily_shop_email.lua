@@ -24,6 +24,10 @@ function index()
 		{"admin", "services", "valorant-daily-shop-email", "bind"},
 		call("action_bind")
 	).leaf = true
+	entry(
+		{"admin", "services", "valorant-daily-shop-email", "cancel-bind"},
+		call("action_cancel_bind")
+	).leaf = true
 end
 
 local function trim(value)
@@ -87,6 +91,16 @@ function action_bind()
 		uci:commit("valorant-daily-shop-email")
 	end
 	local result = sys.call("/usr/libexec/valorant-daily-shop-email/start-bind >/dev/null 2>&1")
+	http.prepare_content("application/json")
+	http.header("Cache-Control", "no-store")
+	http.write(json.stringify({ ok = result == 0 }))
+end
+
+function action_cancel_bind()
+	local http = require "luci.http"
+	local json = require "luci.jsonc"
+	local sys = require "luci.sys"
+	local result = sys.call("/usr/libexec/valorant-daily-shop-email/stop-bind >/dev/null 2>&1")
 	http.prepare_content("application/json")
 	http.header("Cache-Control", "no-store")
 	http.write(json.stringify({ ok = result == 0 }))

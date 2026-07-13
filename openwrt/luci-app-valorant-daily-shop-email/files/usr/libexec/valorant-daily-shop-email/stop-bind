@@ -1,0 +1,14 @@
+#!/bin/sh
+
+PID=/tmp/valorant-daily-shop-email.bind.pid
+
+if [ -s "$PID" ]; then
+	old_pid="$(cat "$PID")"
+	if kill -0 "$old_pid" 2>/dev/null; then
+		kill "$old_pid" 2>/dev/null || true
+		sleep 1
+		kill -0 "$old_pid" 2>/dev/null && kill -9 "$old_pid" 2>/dev/null || true
+	fi
+fi
+
+rm -f "$PID" /tmp/valorant-daily-shop-email.log /tmp/valorant-daily-shop-email/*_login_*.png
