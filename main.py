@@ -1389,17 +1389,29 @@ class ValorantShopEmail:
         for goods in goods_list:
             name = html.escape(str(goods.get("goods_name", "未知商品")))
             price = html.escape(str(goods.get("rmb_price") or goods.get("price") or "0"))
-            image_url = html.escape(str(goods.get("goods_pic") or goods.get("bg_image") or ""), quote=True)
+            image_url = html.escape(str(goods.get("goods_pic") or ""), quote=True)
+            background_url = html.escape(str(goods.get("bg_image") or ""), quote=True)
+            background_attr = f' background="{background_url}"' if background_url else ""
+            background_style = (
+                f"background-color:#202733;background-image:url('{background_url}');"
+                "background-position:center;background-repeat:no-repeat;background-size:cover;"
+                if background_url
+                else "background-color:#202733;"
+            )
             image_markup = (
-                f'<img src="{image_url}" alt="{name}" style="max-width:420px;width:100%;height:auto;display:block">'
+                f'<img src="{image_url}" alt="{name}" width="420" height="200" '
+                'style="display:block;width:100%;max-width:420px;height:200px;object-fit:contain">'
                 if image_url
                 else ""
             )
             cards.append(
-                '<div style="margin:0 0 20px;padding:16px;border:1px solid #d9dde5">'
-                + image_markup
-                + f'<div style="margin-top:12px;font-size:16px"><strong>{name}</strong></div>'
-                + f'<div style="margin-top:6px;color:#555">价格：{price}</div></div>'
+                '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
+                'style="width:100%;margin:0 0 20px;border:1px solid #d9dde5;border-collapse:collapse">'
+                f'<tr><td{background_attr} height="232" valign="middle" align="center" '
+                f'style="{background_style}height:232px;padding:16px">{image_markup}</td></tr>'
+                '<tr><td style="padding:14px 16px 16px;background:#fff">'
+                f'<div style="font-size:16px"><strong>{name}</strong></div>'
+                f'<div style="margin-top:6px;color:#555">价格：{price}</div></td></tr></table>'
             )
         date = datetime.now().strftime("%Y-%m-%d")
         return (

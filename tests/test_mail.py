@@ -64,10 +64,20 @@ class MailTests(unittest.TestCase):
         monitor = load_monitor()
         app = monitor.ValorantShopEmail()
         content = app.build_mail_html(
-            [{"goods_name": "测试商品", "rmb_price": "88", "goods_pic": "https://example.com/item.png"}]
+            [
+                {
+                    "goods_name": "测试商品",
+                    "rmb_price": "88",
+                    "goods_pic": "https://example.com/item.png",
+                    "bg_image": "https://example.com/tier.jpg",
+                }
+            ]
         )
         self.assertIn("测试商品", content)
         self.assertIn("https://example.com/item.png", content)
+        self.assertIn('background="https://example.com/tier.jpg"', content)
+        self.assertIn("background-image:url('https://example.com/tier.jpg')", content)
+        self.assertIn('height="200"', content)
 
     def test_expired_notice_is_sent_once(self):
         environment = {

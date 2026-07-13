@@ -11,7 +11,7 @@ PACKAGE = ROOT / "openwrt" / "luci-app-valorant-daily-shop-email"
 FILES = PACKAGE / "files"
 CONTROL = PACKAGE / "ipk-control"
 DIST = ROOT / "dist"
-VERSION = "1.0.2-1"
+VERSION = "1.0.3-1"
 OUTPUT = DIST / f"luci-app-valorant-daily-shop-email_{VERSION}_all.ipk"
 
 
