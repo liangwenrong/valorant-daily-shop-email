@@ -1445,7 +1445,25 @@ class ValorantShopEmail:
     def send_email(self, goods_list: List[Dict[str, Any]], image_path: Optional[Path] = None) -> None:
 
         date = datetime.now().strftime("%Y-%m-%d")
-        subject = f"{MAIL_SUBJECT_PREFIX}（{date}）"
+
+        # 筛选包含"狂徒"的商品
+        kuangtu_goods = [g for g in goods_list if "狂徒" in str(g.get("goods_name", ""))]
+        N = len(kuangtu_goods)
+
+        # 只有 N>0 且至少一款狂徒商品 rmb_price>900 才发送邮件
+        has_expensive = any(
+            float(str(g.get("rmb_price") or g.get("price") or "0")) > 900
+            for g in kuangtu_goods
+        )
+        if N == 0 or not has_expensive:
+            goods_str = "".join(f"《{str(g.get('goods_name', '未知商品'))}》" for g in goods_list)
+            logger.info("未满足发送条件（狂徒N=%d，存在>900VP：%s），跳过邮件。今日商品：%s",
+                        N, has_expensive, goods_str)
+            return
+
+        # 满足条件，构造并发送邮件
+        goods_str = "".join(f"《{str(g.get('goods_name', '未知商品'))}》" for g in goods_list)
+        subject = f"[{N}] {MAIL_SUBJECT_PREFIX} {goods_str}（{date}）"
 
         msg = MIMEMultipart()
         msg["Subject"] = subject
@@ -1460,7 +1478,7 @@ class ValorantShopEmail:
                 msg.attach(part)
 
         self._deliver_message(msg)
-        logger.info("邮件发送成功")
+        logger.info("邮件发送成功，狂徒N=%d，存在>900VP的商品", N)
 
     def send_test_email(self) -> None:
         msg = MIMEMultipart()
